@@ -98,13 +98,50 @@
             color: #666;
         }
 
-        .file-name {
-            margin-top: 0.5rem;
-            font-size: 0.85rem;
-            color: #6366f1;
-            font-family: monospace;
-            word-break: break-all;
+        .file-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.4rem;
+            list-style: none;
         }
+
+        .file-list:empty { display: none; }
+
+        .file-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            background: #0f0f13;
+            border: 1px solid #2e2e42;
+            border-radius: 6px;
+            padding: 0.45rem 0.65rem;
+            font-size: 0.85rem;
+        }
+
+        .file-item-name {
+            flex: 1;
+            font-family: monospace;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .file-item-size {
+            color: #555;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+
+        .file-item-status {
+            flex-shrink: 0;
+            width: 1rem;
+            text-align: center;
+        }
+
+        .file-item-status.pending  { color: #444; }
+        .file-item-status.sending  { color: #6366f1; }
+        .file-item-status.done     { color: #4ade80; }
+        .file-item-status.error    { color: #f87171; }
 
         button {
             padding: 0.65rem 1.25rem;
@@ -163,14 +200,15 @@
         </div>
 
         <div>
-            <label>File</label>
+            <label>Files</label>
             <div class="drop-zone" id="dropZone">
-                <input type="file" id="fileInput">
+                <input type="file" id="fileInput" multiple>
                 <div class="drop-icon">&#8613;</div>
-                <div class="drop-label">Drop a file here or click to browse</div>
-                <div class="file-name" id="fileName"></div>
+                <div class="drop-label">Drop files here or click to browse</div>
             </div>
         </div>
+
+        <ul class="file-list" id="fileList"></ul>
 
         <button id="uploadBtn" disabled>Upload</button>
 
@@ -181,97 +219,140 @@
     </div>
 
     <script>
-        const tokenInput  = document.getElementById('token');
-        const fileInput   = document.getElementById('fileInput');
-        const dropZone    = document.getElementById('dropZone');
-        const fileName    = document.getElementById('fileName');
-        const uploadBtn   = document.getElementById('uploadBtn');
+        const tokenInput   = document.getElementById('token');
+        const fileInput    = document.getElementById('fileInput');
+        const dropZone     = document.getElementById('dropZone');
+        const fileList     = document.getElementById('fileList');
+        const uploadBtn    = document.getElementById('uploadBtn');
         const progressWrap = document.getElementById('progressWrap');
-        const progressBar = document.getElementById('progressBar');
-        const status      = document.getElementById('status');
+        const progressBar  = document.getElementById('progressBar');
+        const status       = document.getElementById('status');
 
-        let selectedFile = null;
+        let selectedFiles = [];
 
         function updateButton() {
-            uploadBtn.disabled = !(tokenInput.value.trim() && selectedFile);
+            uploadBtn.disabled = !(tokenInput.value.trim() && selectedFiles.length > 0);
         }
 
-        function setFile(file) {
-            selectedFile = file;
-            fileName.textContent = file ? file.name : '';
+        function setFiles(files) {
+            selectedFiles = Array.from(files);
+            renderFileList();
             updateButton();
+        }
+
+        function renderFileList() {
+            fileList.innerHTML = '';
+            for (const file of selectedFiles) {
+                const li = document.createElement('li');
+                li.className = 'file-item';
+                li.dataset.name = file.name;
+                li.innerHTML = `
+                    <span class="file-item-name" title="${esc(file.name)}">${esc(file.name)}</span>
+                    <span class="file-item-size">${formatBytes(file.size)}</span>
+                    <span class="file-item-status pending">&#x2022;</span>
+                `;
+                fileList.appendChild(li);
+            }
+        }
+
+        function setFileStatus(name, state) {
+            const item = fileList.querySelector(`[data-name="${CSS.escape(name)}"] .file-item-status`);
+            if (!item) return;
+            item.className = `file-item-status ${state}`;
+            item.textContent = state === 'sending' ? '…' : state === 'done' ? '✓' : state === 'error' ? '✗' : '•';
         }
 
         tokenInput.addEventListener('input', updateButton);
 
-        fileInput.addEventListener('change', () => {
-            setFile(fileInput.files[0] || null);
-        });
+        fileInput.addEventListener('change', () => setFiles(fileInput.files));
 
         dropZone.addEventListener('dragover', (e) => {
             e.preventDefault();
             dropZone.classList.add('drag-over');
         });
 
-        dropZone.addEventListener('dragleave', () => {
-            dropZone.classList.remove('drag-over');
-        });
+        dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
 
         dropZone.addEventListener('drop', (e) => {
             e.preventDefault();
             dropZone.classList.remove('drag-over');
-            const file = e.dataTransfer.files[0];
-            if (file) setFile(file);
+            if (e.dataTransfer.files.length) setFiles(e.dataTransfer.files);
         });
 
         uploadBtn.addEventListener('click', async () => {
             const token = tokenInput.value.trim();
-            if (!token || !selectedFile) return;
+            if (!token || !selectedFiles.length) return;
 
             uploadBtn.disabled = true;
             progressWrap.classList.add('visible');
-            progressBar.value = 0;
-            status.className = 'status info';
-            status.textContent = 'Uploading…';
 
-            const xhr = new XMLHttpRequest();
-            xhr.open('POST', `/upload/${encodeURIComponent(token)}`);
+            let errorCount = 0;
 
-            xhr.upload.addEventListener('progress', (e) => {
-                if (e.lengthComputable) {
-                    progressBar.value = Math.round((e.loaded / e.total) * 100);
-                }
-            });
+            for (let i = 0; i < selectedFiles.length; i++) {
+                const file = selectedFiles[i];
 
-            xhr.addEventListener('load', () => {
-                if (xhr.status === 204) {
-                    progressBar.value = 100;
-                    status.className = 'status success';
-                    status.textContent = `Sent ${formatBytes(selectedFile.size)} successfully.`;
+                status.className = 'status info';
+                status.textContent = `Uploading ${i + 1} of ${selectedFiles.length}: ${file.name}`;
+                progressBar.value = 0;
+                setFileStatus(file.name, 'sending');
+
+                const err = await uploadFile(token, file);
+
+                if (err) {
+                    setFileStatus(file.name, 'error');
+                    errorCount++;
                 } else {
-                    status.className = 'status error';
-                    status.textContent = `Upload failed: ${xhr.status} ${xhr.statusText || xhr.responseText}`;
+                    setFileStatus(file.name, 'done');
                 }
-                uploadBtn.disabled = false;
-            });
+            }
 
-            xhr.addEventListener('error', () => {
+            if (errorCount === 0) {
+                progressBar.value = 100;
+                status.className = 'status success';
+                status.textContent = selectedFiles.length === 1
+                    ? `Sent ${formatBytes(selectedFiles[0].size)} successfully.`
+                    : `Sent ${selectedFiles.length} files successfully.`;
+            } else {
                 status.className = 'status error';
-                status.textContent = 'Network error — could not reach server.';
-                uploadBtn.disabled = false;
-            });
+                status.textContent = `${errorCount} of ${selectedFiles.length} file(s) failed.`;
+            }
 
-            const formData = new FormData();
-            formData.append('path', selectedFile.name);
-            formData.append('file', selectedFile, selectedFile.name);
-            xhr.send(formData);
+            uploadBtn.disabled = false;
         });
+
+        function uploadFile(token, file) {
+            return new Promise((resolve) => {
+                const xhr = new XMLHttpRequest();
+                xhr.open('POST', `/upload/${encodeURIComponent(token)}`);
+
+                xhr.upload.addEventListener('progress', (e) => {
+                    if (e.lengthComputable) {
+                        progressBar.value = Math.round((e.loaded / e.total) * 100);
+                    }
+                });
+
+                xhr.addEventListener('load', () => {
+                    resolve(xhr.status === 204 ? null : `${xhr.status} ${xhr.responseText || xhr.statusText}`);
+                });
+
+                xhr.addEventListener('error', () => resolve('network error'));
+
+                const formData = new FormData();
+                formData.append('path', file.name);
+                formData.append('file', file, file.name);
+                xhr.send(formData);
+            });
+        }
 
         function formatBytes(n) {
             if (n < 1024) return `${n} B`;
             if (n < 1024 ** 2) return `${(n / 1024).toFixed(1)} KB`;
             if (n < 1024 ** 3) return `${(n / 1024 ** 2).toFixed(1)} MB`;
             return `${(n / 1024 ** 3).toFixed(1)} GB`;
+        }
+
+        function esc(s) {
+            return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
         }
     </script>
 </body>
