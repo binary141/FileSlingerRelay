@@ -25,12 +25,18 @@ var (
 	upgrader = websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool { return true },
 	}
+	authCode = os.Getenv("AUTH_CODE")
 )
 
 func handleSession(w http.ResponseWriter, r *http.Request) {
 	token := r.PathValue("token")
 	if token == "" {
 		http.Error(w, "missing token", http.StatusBadRequest)
+		return
+	}
+
+	if authCode != "" && r.URL.Query().Get("auth") != authCode {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
