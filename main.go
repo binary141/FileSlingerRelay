@@ -1,7 +1,9 @@
 package main
 
 import (
+	"embed"
 	"io"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
@@ -9,6 +11,9 @@ import (
 
 	"github.com/gorilla/websocket"
 )
+
+//go:embed all:web
+var webFS embed.FS
 
 type session struct {
 	conn *websocket.Conn
@@ -97,7 +102,15 @@ func handlePing(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	webContent, err := fs.Sub(webFS, "web")
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	mux := http.NewServeMux()
+	if os.Getenv("SERVE_UI") == "true" {
+		mux.Handle("GET /", http.FileServer(http.FS(webContent)))
+	}
 	mux.HandleFunc("GET /ping", handlePing)
 	mux.HandleFunc("GET /session/{token}", handleSession)
 	mux.HandleFunc("POST /upload/{token}", handleUpload)
@@ -109,6 +122,6 @@ func main() {
 	addr := ":" + port
 	log.Printf("relay listening on %s", addr)
 	if err := http.ListenAndServe(addr, mux); err != nil {
-		log.Fatal(err)
+		log.Fatalf("error listening and serving: %v", err)
 	}
 }

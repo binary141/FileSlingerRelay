@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FileSlingerServer</title>
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: system-ui, sans-serif;
+            background: #0f0f13;
+            color: #e2e2e2;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1.5rem;
+        }
+
+        .card {
+            background: #1a1a24;
+            border: 1px solid #2e2e42;
+            border-radius: 12px;
+            padding: 2rem;
+            width: 100%;
+            max-width: 480px;
+            display: flex;
+            flex-direction: column;
+            gap: 1.25rem;
+        }
+
+        h1 {
+            font-size: 1.4rem;
+            font-weight: 600;
+            letter-spacing: -0.02em;
+            color: #fff;
+        }
+
+        label {
+            font-size: 0.8rem;
+            font-weight: 500;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            display: block;
+            margin-bottom: 0.4rem;
+        }
+
+        input[type="text"] {
+            width: 100%;
+            padding: 0.6rem 0.75rem;
+            background: #0f0f13;
+            border: 1px solid #2e2e42;
+            border-radius: 6px;
+            color: #e2e2e2;
+            font-size: 0.95rem;
+            font-family: monospace;
+            outline: none;
+            transition: border-color 0.15s;
+        }
+
+        input[type="text"]:focus {
+            border-color: #6366f1;
+        }
+
+        .drop-zone {
+            border: 2px dashed #2e2e42;
+            border-radius: 8px;
+            padding: 2rem 1rem;
+            text-align: center;
+            cursor: pointer;
+            transition: border-color 0.15s, background 0.15s;
+            position: relative;
+        }
+
+        .drop-zone:hover,
+        .drop-zone.drag-over {
+            border-color: #6366f1;
+            background: #1e1e2e;
+        }
+
+        .drop-zone input[type="file"] {
+            position: absolute;
+            inset: 0;
+            opacity: 0;
+            cursor: pointer;
+        }
+
+        .drop-icon {
+            font-size: 2rem;
+            margin-bottom: 0.5rem;
+            color: #444;
+        }
+
+        .drop-label {
+            font-size: 0.9rem;
+            color: #666;
+        }
+
+        .file-name {
+            margin-top: 0.5rem;
+            font-size: 0.85rem;
+            color: #6366f1;
+            font-family: monospace;
+            word-break: break-all;
+        }
+
+        button {
+            padding: 0.65rem 1.25rem;
+            background: #6366f1;
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            font-size: 0.95rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.15s, opacity 0.15s;
+        }
+
+        button:hover:not(:disabled) { background: #4f51d8; }
+        button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+        .progress-wrap {
+            display: none;
+            flex-direction: column;
+            gap: 0.4rem;
+        }
+
+        .progress-wrap.visible { display: flex; }
+
+        progress {
+            width: 100%;
+            height: 6px;
+            appearance: none;
+            border-radius: 99px;
+            overflow: hidden;
+            border: none;
+            background: #2e2e42;
+        }
+
+        progress::-webkit-progress-bar { background: #2e2e42; }
+        progress::-webkit-progress-value { background: #6366f1; border-radius: 99px; }
+        progress::-moz-progress-bar { background: #6366f1; border-radius: 99px; }
+
+        .status {
+            font-size: 0.85rem;
+            text-align: center;
+        }
+
+        .status.success { color: #4ade80; }
+        .status.error   { color: #f87171; }
+        .status.info    { color: #888; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>FileSlingerServer</h1>
+
+        <div>
+            <label for="token">Session token</label>
+            <input type="text" id="token" placeholder="enter session token" autocomplete="off" spellcheck="false">
+        </div>
+
+        <div>
+            <label>File</label>
+            <div class="drop-zone" id="dropZone">
+                <input type="file" id="fileInput">
+                <div class="drop-icon">&#8613;</div>
+                <div class="drop-label">Drop a file here or click to browse</div>
+                <div class="file-name" id="fileName"></div>
+            </div>
+        </div>
+
+        <button id="uploadBtn" disabled>Upload</button>
+
+        <div class="progress-wrap" id="progressWrap">
+            <progress id="progressBar" value="0" max="100"></progress>
+            <div class="status info" id="status"></div>
+        </div>
+    </div>
+
+    <script>
+        const tokenInput  = document.getElementById('token');
+        const fileInput   = document.getElementById('fileInput');
+        const dropZone    = document.getElementById('dropZone');
+        const fileName    = document.getElementById('fileName');
+        const uploadBtn   = document.getElementById('uploadBtn');
+        const progressWrap = document.getElementById('progressWrap');
+        const progressBar = document.getElementById('progressBar');
+        const status      = document.getElementById('status');
+
+        let selectedFile = null;
+
+        function updateButton() {
+            uploadBtn.disabled = !(tokenInput.value.trim() && selectedFile);
+        }
+
+        function setFile(file) {
+            selectedFile = file;
+            fileName.textContent = file ? file.name : '';
+            updateButton();
+        }
+
+        tokenInput.addEventListener('input', updateButton);
+
+        fileInput.addEventListener('change', () => {
+            setFile(fileInput.files[0] || null);
+        });
+
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('drag-over');
+        });
+
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('drag-over');
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('drag-over');
+            const file = e.dataTransfer.files[0];
+            if (file) setFile(file);
+        });
+
+        uploadBtn.addEventListener('click', async () => {
+            const token = tokenInput.value.trim();
+            if (!token || !selectedFile) return;
+
+            uploadBtn.disabled = true;
+            progressWrap.classList.add('visible');
+            progressBar.value = 0;
+            status.className = 'status info';
+            status.textContent = 'Uploading…';
+
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', `/upload/${encodeURIComponent(token)}`);
+
+            xhr.upload.addEventListener('progress', (e) => {
+                if (e.lengthComputable) {
+                    progressBar.value = Math.round((e.loaded / e.total) * 100);
+                }
+            });
+
+            xhr.addEventListener('load', () => {
+                if (xhr.status === 204) {
+                    progressBar.value = 100;
+                    status.className = 'status success';
+                    status.textContent = `Sent ${formatBytes(selectedFile.size)} successfully.`;
+                } else {
+                    status.className = 'status error';
+                    status.textContent = `Upload failed: ${xhr.status} ${xhr.statusText || xhr.responseText}`;
+                }
+                uploadBtn.disabled = false;
+            });
+
+            xhr.addEventListener('error', () => {
+                status.className = 'status error';
+                status.textContent = 'Network error — could not reach server.';
+                uploadBtn.disabled = false;
+            });
+
+            const formData = new FormData();
+            formData.append('path', selectedFile.name);
+            formData.append('file', selectedFile, selectedFile.name);
+            xhr.send(formData);
+        });
+
+        function formatBytes(n) {
+            if (n < 1024) return `${n} B`;
+            if (n < 1024 ** 2) return `${(n / 1024).toFixed(1)} KB`;
+            if (n < 1024 ** 3) return `${(n / 1024 ** 2).toFixed(1)} MB`;
+            return `${(n / 1024 ** 3).toFixed(1)} GB`;
+        }
+    </script>
+</body>
+</html>
